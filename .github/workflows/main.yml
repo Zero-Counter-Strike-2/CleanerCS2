@@ -41,7 +41,12 @@ jobs:
       - name: Show XMake version
         run: |
           xmake --version
-          ls -la
+          # 使用兼容的列表命令
+          if [[ "$RUNNER_OS" == "Windows" ]]; then
+            dir
+          else
+            ls -la
+          fi
 
       - name: Configure with XMake
         run: |
