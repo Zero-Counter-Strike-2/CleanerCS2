@@ -25,6 +25,11 @@ jobs:
             config: release
     runs-on: ${{ matrix.os }}
     name: Build on ${{ matrix.platform }}-${{ matrix.arch }}
+    timeout-minutes: 20  # 设置更长的超时时间
+
+    env:
+      HL2SDKCS2: ${{ github.workspace }}/hl2sdk
+      MMSOURCE112: ${{ github.workspace }}/metamod-source
 
     steps:
       - name: Checkout CleanerCS2
@@ -49,26 +54,34 @@ jobs:
           path: metamod-source
           submodules: recursive
 
-      # =============================
-      # 🟢 官方推荐安装方式（跨平台）
-      # =============================
-      - name: Install XMake (Official Script)
-        run: |
-          if ($env:RUNNER_OS -eq "Windows") {
-            # Windows: 使用官方 PowerShell 脚本安装
-            iex "& { $(irm https://xmake.io/install.ps1) }"
-          } else {
-            # Linux/macOS: 使用官方 Bash 脚本安装
-            bash <(curl -fsSL https://xmake.io/install.sh)
-          }
-        shell: powershell
+      - name: Install XMake
+        uses: xmake-io/github-action-setup-xmake@v1
+        with:
+          xmake-version: latest
 
-      - name: Verify XMake Installation
+      - name: Show environment info
         run: |
-          echo "XMake version:"
+          echo "=== Environment Info ==="
           xmake --version
-          if ($LASTEXITCODE -ne 0) {
-            Write-Error "XMake not installed correctly!"
+          echo "RUNNER_OS: $env:RUNNER_OS"
+          echo "PWD: $env:PWD"
+          echo "HL2SDKCS2: $env:HL2SDKCS2"
+          echo "MMSOURCE112: $env:MMSOURCE112"
+          echo "========================"
+
+      - name: Validate vendor libraries (Windows)
+        if: matrix.os == 'windows-latest'
+        run: |
+          if (Test-Path "cleaner-cs2/vendor/funchook/lib/Release/funchook.lib") {
+            echo "✓ funchook.lib found"
+          } else {
+            echo "✗ funchook.lib not found! Please commit it to your repo."
+            exit 1
+          }
+          if (Test-Path "cleaner-cs2/vendor/funchook/lib/Release/distorm.lib") {
+            echo "✓ distorm.lib found"
+          } else {
+            echo "✗ distorm.lib not found! Please commit it to your repo."
             exit 1
           }
         shell: powershell
@@ -77,19 +90,14 @@ jobs:
         working-directory: cleaner-cs2
         run: |
           echo "Configuring for ${{ matrix.platform }}-${{ matrix.arch }}"
-          
-          if ($env:RUNNER_OS -eq "Windows") {
-            xmake f -p windows -a x64 -m release
-          } else {
-            xmake f -p linux -a x64 -m release
-          }
+          xmake f -p ${{ matrix.platform }} -a ${{ matrix.arch }} -m ${{ matrix.config }}
         shell: powershell
 
       - name: Build project
         working-directory: cleaner-cs2
         run: |
           echo "Building project..."
-          xmake build -v
+          xmake build -vD  # 启用详细调试输出
         shell: powershell
 
       - name: Verify build success
@@ -101,7 +109,7 @@ jobs:
               Get-ChildItem -Path "build/windows/x64/release" -Force
             } else {
               echo "✗ DLL build failed"
-              Get-ChildItem -Path "build/windows/x64/release" -Force
+              dir "build/windows/x64/release" -Recurse
               exit 1
             }
           } else {
@@ -119,17 +127,14 @@ jobs:
       - name: Create package structure
         working-directory: cleaner-cs2
         run: |
+          mkdir -p package
           if ($env:RUNNER_OS -eq "Windows") {
-            New-Item -ItemType Directory -Path "package" -Force
             if (Test-Path "build/windows/x64/release/CleanerCS2-Xmake.dll") {
-              Copy-Item -Path "build/windows/x64/release/CleanerCS2-Xmake.dll" -Destination "package/"
-              echo "✓ Copied DLL to package"
+              cp "build/windows/x64/release/CleanerCS2-Xmake.dll" package/
             }
           } else {
-            mkdir -p package
             if (Test-Path "build/linux/x86_64/release/libCleanerCS2-Xmake.so") {
               cp "build/linux/x86_64/release/libCleanerCS2-Xmake.so" package/
-              echo "✓ Copied SO to package"
             }
           }
         shell: powershell
