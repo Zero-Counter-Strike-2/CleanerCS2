@@ -26,10 +26,31 @@ jobs:
     runs-on: ${{ matrix.os }}
     name: Build on ${{ matrix.platform }}-${{ matrix.arch }}
 
+    env:
+      HL2SDKCS2: ${{ github.workspace }}/hl2sdk
+      MMSOURCE112: ${{ github.workspace }}/metamod-source
+
     steps:
-      - name: Checkout code
+      - name: Checkout CleanerCS2
         uses: actions/checkout@v4
         with:
+          path: cleaner-cs2
+          submodules: recursive
+
+      - name: Checkout HL2SDK-CS2
+        uses: actions/checkout@v4
+        with:
+          repository: alliedmodders/hl2sdk
+          ref: 8e3da65bdf33e2dfb04ad57208e85ffc9e93c048
+          path: hl2sdk
+          submodules: recursive
+
+      - name: Checkout Metamod-Source
+        uses: actions/checkout@v4
+        with:
+          repository: alliedmodders/metamod-source
+          ref: master
+          path: metamod-source
           submodules: recursive
 
       - name: Install XMake
@@ -37,62 +58,89 @@ jobs:
         with:
           xmake-version: latest
 
-      - name: Show XMake version
-        run: xmake --version
-
-      # Windows-specific setup
-      - name: Setup Windows Environment
-        if: github.runner.os == 'Windows'
+      - name: Show system info
         run: |
-          echo "Setting up Windows environment..."
-          # 创建必要的文件夹结构
-          mkdir -p build/windows/x64/release
-          # 显示当前目录结构
-          dir
-
-      # Linux-specific setup
-      - name: Setup Linux Environment
-        if: github.runner.os == 'Linux'
-        run: |
-          echo "Setting up Linux environment..."
-          mkdir -p build/linux/x86_64/release
-          # 显示当前目录结构
-          ls -la
+          xmake --version
+          echo "Working directory: $PWD"
+          echo "HL2SDKCS2 path: $HL2SDKCS2"
+          echo "MMSOURCE112 path: $MMSOURCE112"
+          ls -la $HL2SDKCS2
+          ls -la $MMSOURCE112
 
       - name: Configure with XMake
+        working-directory: cleaner-cs2
         run: |
-          echo "Configuring project..."
-          # 只设置平台和架构，不指定模式
+          echo "Configuring for ${{ matrix.platform }}-${{ matrix.arch }}"
           xmake f -p ${{ matrix.platform }} -a ${{ matrix.arch }} --backup
 
       - name: Build project
+        working-directory: cleaner-cs2
         run: |
           echo "Building project..."
           xmake build -v
 
-      - name: Build package (if exists)
+      - name: Verify build success
+        working-directory: cleaner-cs2
         run: |
-          echo "Creating package..."
-          xmake package -v
+          if [[ "${{ matrix.platform }}" == "windows" ]]; then
+            if [ -f "build/windows/x64/release/CleanerCS2-Xmake.dll" ]; then
+              echo "✓ DLL build successful"
+              ls -la build/windows/x64/release/
+            else
+              echo "✗ DLL build failed"
+              ls -la build/windows/x64/release/
+              exit 1
+            fi
+          else
+            if [ -f "build/linux/x86_64/release/libCleanerCS2-Xmake.so" ]; then
+              echo "✓ SO build successful"
+              ls -la build/linux/x86_64/release/
+            else
+              echo "✗ SO build failed"
+              ls -la build/linux/x86_64/release/
+              exit 1
+            fi
+          fi
 
-      # 只有在构建成功时才上传Artifacts
+      - name: Create package structure
+        working-directory: cleaner-cs2
+        run: |
+          mkdir -p package
+          # Copy the built library to package directory
+          if [[ "${{ matrix.platform }}" == "windows" ]]; then
+            cp build/windows/x64/release/CleanerCS2-Xmake.dll package/
+          else
+            cp build/linux/x86_64/release/libCleanerCS2-Xmake.so package/
+          fi
+
       - name: Upload build artifacts
         if: success()
         uses: actions/upload-artifact@v4
         with:
           name: cleaner-cs2-${{ matrix.platform }}-${{ matrix.arch }}-build
           path: |
-            build/**
-            *.dll
-            *.so
-            *.dylib
-            *.exe
-            *.zip
-            *.tar.gz
+            cleaner-cs2/package/**
+            cleaner-cs2/build/**
           retention-days: 7
 
-      - name: List build files
+      - name: Upload source code
         if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cleaner-cs2-source
+          path: |
+            cleaner-cs2/src/**
+            cleaner-cs2/xmake.lua
+            cleaner-cs2/README.md
+            cleaner-cs2/LICENSE
+            cleaner-cs2/package/**
+          retention-days: 7
+
+      - name: Final verification
+        if: success()
+        working-directory: cleaner-cs2
         run: |
-          echo "Build directory contents:"
-          find . -name "*.dll" -o -name "*.so" -o -name "*.dylib" -o -name "*.exe" | head -20
+          echo "=== Build completed successfully ==="
+          echo "Available files:"
+          find package -type f
+          echo "=================================="
