@@ -64,14 +64,23 @@ jobs:
           echo "Working directory: $PWD"
           echo "HL2SDKCS2 path: $HL2SDKCS2"
           echo "MMSOURCE112 path: $MMSOURCE112"
-          ls -la $HL2SDKCS2
-          ls -la $MMSOURCE112
+          # 使用兼容的命令
+          if [[ "$RUNNER_OS" == "Windows" ]]; then
+            Get-ChildItem -Path "$HL2SDKCS2" -Force
+          else
+            ls -la "$HL2SDKCS2"
+          fi
 
       - name: Configure with XMake
         working-directory: cleaner-cs2
         run: |
           echo "Configuring for ${{ matrix.platform }}-${{ matrix.arch }}"
-          xmake f -p ${{ matrix.platform }} -a ${{ matrix.arch }} --backup
+          # 移除不兼容的 --backup 参数
+          if [[ "$RUNNER_OS" == "Windows" ]]; then
+            xmake f -p windows -a x64 -m release
+          else
+            xmake f -p linux -a x64 -m release
+          fi
 
       - name: Build project
         working-directory: cleaner-cs2
@@ -82,22 +91,22 @@ jobs:
       - name: Verify build success
         working-directory: cleaner-cs2
         run: |
-          if [[ "${{ matrix.platform }}" == "windows" ]]; then
+          if [[ "$RUNNER_OS" == "Windows" ]]; then
             if [ -f "build/windows/x64/release/CleanerCS2-Xmake.dll" ]; then
               echo "✓ DLL build successful"
-              ls -la build/windows/x64/release/
+              Get-ChildItem -Path "build/windows/x64/release" -Force
             else
               echo "✗ DLL build failed"
-              ls -la build/windows/x64/release/
+              Get-ChildItem -Path "build/windows/x64/release" -Force
               exit 1
             fi
           else
             if [ -f "build/linux/x86_64/release/libCleanerCS2-Xmake.so" ]; then
               echo "✓ SO build successful"
-              ls -la build/linux/x86_64/release/
+              ls -la "build/linux/x86_64/release"
             else
               echo "✗ SO build failed"
-              ls -la build/linux/x86_64/release/
+              ls -la "build/linux/x86_64/release"
               exit 1
             fi
           fi
@@ -107,10 +116,14 @@ jobs:
         run: |
           mkdir -p package
           # Copy the built library to package directory
-          if [[ "${{ matrix.platform }}" == "windows" ]]; then
-            cp build/windows/x64/release/CleanerCS2-Xmake.dll package/
+          if [[ "$RUNNER_OS" == "Windows" ]]; then
+            if [ -f "build/windows/x64/release/CleanerCS2-Xmake.dll" ]; then
+              cp "build/windows/x64/release/CleanerCS2-Xmake.dll" package/
+            fi
           else
-            cp build/linux/x86_64/release/libCleanerCS2-Xmake.so package/
+            if [ -f "build/linux/x86_64/release/libCleanerCS2-Xmake.so" ]; then
+              cp "build/linux/x86_64/release/libCleanerCS2-Xmake.so" package/
+            fi
           fi
 
       - name: Upload build artifacts
@@ -141,6 +154,9 @@ jobs:
         working-directory: cleaner-cs2
         run: |
           echo "=== Build completed successfully ==="
-          echo "Available files:"
-          find package -type f
+          if [[ "$RUNNER_OS" == "Windows" ]]; then
+            Get-ChildItem -Path "package" -Recurse -Force
+          else
+            find package -type f
+          fi
           echo "=================================="
