@@ -1,0 +1,83 @@
+name: Build with XMake
+on:
+  push:
+    branches:
+      - master
+      - main
+  pull_request:
+    branches:
+      - master
+      - main
+  workflow_dispatch:
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          - os: windows-latest
+            platform: windows
+            arch: x64
+          - os: ubuntu-latest
+            platform: linux
+            arch: x64
+          - os: macos-latest
+            platform: macos
+            arch: x64
+    runs-on: ${{ matrix.os }}
+    name: Build on ${{ matrix.platform }}-${{ matrix.arch }}
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install XMake
+        uses: xmake-io/github-action-setup-xmake@v1
+        with:
+          xmake-version: latest
+
+      - name: Show XMake version
+        run: |
+          xmake --version
+          ls -la
+
+      - name: Configure with XMake
+        run: |
+          xmake f -p ${{ matrix.platform }} -a ${{ matrix.arch }} --backup
+          xmake -v
+
+      - name: Build project
+        run: |
+          xmake build -v
+
+      - name: Run tests (if any)
+        run: |
+          xmake run -v
+
+      - name: Package build artifacts
+        uses: actions/upload-artifact@v4
+        if: success() || failure()
+        with:
+          name: cleaner-cs2-${{ matrix.platform }}-${{ matrix.arch }}-build
+          path: |
+            build/**
+            *.dll
+            *.so
+            *.dylib
+            *.exe
+          retention-days: 7
+
+      - name: Upload source archive
+        uses: actions/upload-artifact@v4
+        if: success() || failure()
+        with:
+          name: cleaner-cs2-source-${{ matrix.platform }}-${{ matrix.arch }}
+          path: |
+            src/**
+            *.xmake
+            Makefile
+            README.md
+            LICENSE
+          retention-days: 7
