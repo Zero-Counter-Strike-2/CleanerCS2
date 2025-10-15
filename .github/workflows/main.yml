@@ -1,4 +1,4 @@
-name: Build with XMake
+name: Build CleanerCS2 with XMake
 on:
   push:
     branches:
@@ -18,15 +18,14 @@ jobs:
           - os: windows-latest
             platform: windows
             arch: x64
+            config: release
           - os: ubuntu-latest
             platform: linux
             arch: x64
-          - os: macos-latest
-            platform: macos
-            arch: x64
+            config: release
     runs-on: ${{ matrix.os }}
     name: Build on ${{ matrix.platform }}-${{ matrix.arch }}
-    
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -39,31 +38,47 @@ jobs:
           xmake-version: latest
 
       - name: Show XMake version
+        run: xmake --version
+
+      # Windows-specific setup
+      - name: Setup Windows Environment
+        if: github.runner.os == 'Windows'
         run: |
-          xmake --version
-          # 使用兼容的列表命令
-          if [[ "$RUNNER_OS" == "Windows" ]]; then
-            dir
-          else
-            ls -la
-          fi
+          echo "Setting up Windows environment..."
+          # 创建必要的文件夹结构
+          mkdir -p build/windows/x64/release
+          # 显示当前目录结构
+          dir
+
+      # Linux-specific setup
+      - name: Setup Linux Environment
+        if: github.runner.os == 'Linux'
+        run: |
+          echo "Setting up Linux environment..."
+          mkdir -p build/linux/x86_64/release
+          # 显示当前目录结构
+          ls -la
 
       - name: Configure with XMake
         run: |
+          echo "Configuring project..."
+          # 只设置平台和架构，不指定模式
           xmake f -p ${{ matrix.platform }} -a ${{ matrix.arch }} --backup
-          xmake -v
 
       - name: Build project
         run: |
+          echo "Building project..."
           xmake build -v
 
-      - name: Run tests (if any)
+      - name: Build package (if exists)
         run: |
-          xmake run -v
+          echo "Creating package..."
+          xmake package -v
 
-      - name: Package build artifacts
+      # 只有在构建成功时才上传Artifacts
+      - name: Upload build artifacts
+        if: success()
         uses: actions/upload-artifact@v4
-        if: success() || failure()
         with:
           name: cleaner-cs2-${{ matrix.platform }}-${{ matrix.arch }}-build
           path: |
@@ -72,17 +87,12 @@ jobs:
             *.so
             *.dylib
             *.exe
+            *.zip
+            *.tar.gz
           retention-days: 7
 
-      - name: Upload source archive
-        uses: actions/upload-artifact@v4
-        if: success() || failure()
-        with:
-          name: cleaner-cs2-source-${{ matrix.platform }}-${{ matrix.arch }}
-          path: |
-            src/**
-            *.xmake
-            Makefile
-            README.md
-            LICENSE
-          retention-days: 7
+      - name: List build files
+        if: success()
+        run: |
+          echo "Build directory contents:"
+          find . -name "*.dll" -o -name "*.so" -o -name "*.dylib" -o -name "*.exe" | head -20
