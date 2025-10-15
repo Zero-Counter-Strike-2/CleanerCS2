@@ -90,7 +90,7 @@ jobs:
         working-directory: cleaner-cs2
         run: |
           echo "Configuring for ${{ matrix.platform }}-${{ matrix.arch }}"
-          xmake f -p ${{ matrix.platform }} -a ${{ matrix.arch }} -m ${{ matrix.config }}
+          xmake f -p ${{ matrix.platform }} -a ${{ matrix.arch }} -m ${{ matrix.config }} -y --build
         shell: powershell
 
       - name: Build project
