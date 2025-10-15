@@ -26,10 +26,6 @@ jobs:
     runs-on: ${{ matrix.os }}
     name: Build on ${{ matrix.platform }}-${{ matrix.arch }}
 
-    env:
-      HL2SDKCS2: ${{ github.workspace }}/hl2sdk
-      MMSOURCE112: ${{ github.workspace }}/metamod-source
-
     steps:
       - name: Checkout CleanerCS2
         uses: actions/checkout@v4
@@ -53,121 +49,93 @@ jobs:
           path: metamod-source
           submodules: recursive
 
-      - name: Install XMake
-        uses: xmake-io/github-action-setup-xmake@v1
-        with:
-          xmake-version: latest
-
-      - name: Setup build environment
+      - name: Setup MinGW-w64 (Linux)
+        if: contains(matrix.os, 'ubuntu')
         run: |
-          echo "=== Environment Information ==="
-          xmake --version
-          echo "Runner OS: $env:RUNNER_OS"
-          echo "Working directory: $env:PWD"
-          echo "HL2SDKCS2 path: $env:HL2SDKCS2"
-          echo "MMSOURCE112 path: $env:MMSOURCE112"
-          
-          # Check if paths exist
-          if (Test-Path "$env:HL2SDKCS2") {
-            echo "✓ HL2SDK path exists"
-            Get-ChildItem -Path "$env:HL2SDKCS2" -Force | Select-Object Name, Length
+          sudo apt-get update
+          sudo apt-get install -y build-essential mingw-w64
+
+      - name: Setup XMake
+        run: |
+          # 直接使用GitHub提供的xmake
+          if ("${{ runner.os }}" -eq "Windows") {
+            # Windows使用PowerShell直接下载
+            Invoke-WebRequest -Uri "https://github.com/xmake-io/xmake/releases/download/v3.0.4/xmake-v3.0.4-win64.zip" -OutFile "xmake.zip"
+            Expand-Archive -Path "xmake.zip" -DestinationPath "."
+            $env:PATH += ";$pwd"
           } else {
-            echo "✗ HL2SDK path does not exist"
-            dir "$env:HL2SDKCS2" -ErrorAction SilentlyContinue
-          }
-          
-          if (Test-Path "$env:MMSOURCE112") {
-            echo "✓ Metamod-Source path exists"
-            Get-ChildItem -Path "$env:MMSOURCE112" -Force | Select-Object Name, Length
-          } else {
-            echo "✗ Metamod-Source path does not exist"
-            dir "$env:MMSOURCE112" -ErrorAction SilentlyContinue
+            # Linux使用包管理器
+            curl -fsSL https://xmake.io/shget.text | bash
           }
 
-      - name: Show project structure
-        working-directory: cleaner-cs2
+      - name: Show environment
         run: |
-          echo "=== Project Structure ==="
-          if (Test-Path "xmake.lua") {
-            echo "✓ xmake.lua exists"
-            Get-Content xmake.lua | Select-Object -First 10
+          if ("${{ runner.os }}" -eq "Windows") {
+            Write-Host "Windows environment"
+            Get-Command xmake
           } else {
-            echo "✗ xmake.lua not found"
-            dir -Recurse
+            echo "Linux environment"
+            which xmake
           }
 
       - name: Configure with XMake
         working-directory: cleaner-cs2
         run: |
-          echo "=== Configuring XMake ==="
           echo "Configuring for ${{ matrix.platform }}-${{ matrix.arch }}"
           
-          # Set timeout to prevent cancellation
-          $ErrorActionPreference = "Stop"
-          try {
+          if ("${{ runner.os }}" -eq "Windows") {
+            # Windows平台配置
             xmake f -p windows -a x64 -m release
-            if ($LASTEXITCODE -ne 0) {
-              echo "XMake configure failed with exit code: $LASTEXITCODE"
-              exit 1
-            }
-            echo "XMake configure completed successfully"
-          } catch {
-            echo "XMake configure error: $_"
-            exit 1
+          } else {
+            # Linux平台配置
+            xmake f -p linux -a x64 -m release
           }
         shell: powershell
 
       - name: Build project
         working-directory: cleaner-cs2
         run: |
-          echo "=== Building Project ==="
-          $ErrorActionPreference = "Stop"
-          try {
-            xmake build -v
-            if ($LASTEXITCODE -ne 0) {
-              echo "Build failed with exit code: $LASTEXITCODE"
-              exit 1
-            }
-            echo "Build completed successfully"
-          } catch {
-            echo "Build error: $_"
-            exit 1
-          }
+          echo "Building project..."
+          xmake build -v
         shell: powershell
 
       - name: Verify build success
         working-directory: cleaner-cs2
         run: |
-          echo "=== Verifying Build ==="
-          $ErrorActionPreference = "Stop"
-          try {
+          if ("${{ runner.os }}" -eq "Windows") {
             if (Test-Path "build/windows/x64/release/CleanerCS2-Xmake.dll") {
               echo "✓ DLL build successful"
               Get-ChildItem -Path "build/windows/x64/release" -Force
-              exit 0
             } else {
               echo "✗ DLL build failed"
-              if (Test-Path "build/windows/x64/release") {
-                Get-ChildItem -Path "build/windows/x64/release" -Force
-              }
+              Get-ChildItem -Path "build/windows/x64/release" -Force
               exit 1
             }
-          } catch {
-            echo "Verification error: $_"
-            exit 1
+          } else {
+            if (Test-Path "build/linux/x86_64/release/libCleanerCS2-Xmake.so") {
+              echo "✓ SO build successful"
+              ls -la "build/linux/x86_64/release"
+            } else {
+              echo "✗ SO build failed"
+              ls -la "build/linux/x86_64/release"
+              exit 1
+            }
           }
         shell: powershell
 
       - name: Create package structure
         working-directory: cleaner-cs2
         run: |
-          echo "=== Creating Package ==="
-          New-Item -ItemType Directory -Path "package" -Force
-          if (Test-Path "build/windows/x64/release/CleanerCS2-Xmake.dll") {
-            Copy-Item -Path "build/windows/x64/release/CleanerCS2-Xmake.dll" -Destination "package/"
-            echo "✓ Copied DLL to package"
+          mkdir -p package
+          if ("${{ runner.os }}" -eq "Windows") {
+            if (Test-Path "build/windows/x64/release/CleanerCS2-Xmake.dll") {
+              cp "build/windows/x64/release/CleanerCS2-Xmake.dll" package/
+            }
+          } else {
+            if (Test-Path "build/linux/x86_64/release/libCleanerCS2-Xmake.so") {
+              cp "build/linux/x86_64/release/libCleanerCS2-Xmake.so" package/
+            }
           }
-          Get-ChildItem -Path "package" -Recurse -Force
         shell: powershell
 
       - name: Upload build artifacts
@@ -192,13 +160,3 @@ jobs:
             cleaner-cs2/LICENSE
             cleaner-cs2/package/**
           retention-days: 7
-
-      - name: Final verification
-        if: success()
-        working-directory: cleaner-cs2
-        run: |
-          echo "=== Final Verification ==="
-          echo "Final package contents:"
-          Get-ChildItem -Path "package" -Recurse -Force
-          echo "=================================="
-        shell: powershell
