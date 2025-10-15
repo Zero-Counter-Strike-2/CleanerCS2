@@ -49,45 +49,38 @@ jobs:
           path: metamod-source
           submodules: recursive
 
-      - name: Setup MinGW-w64 (Linux)
-        if: contains(matrix.os, 'ubuntu')
+      # =============================
+      # 🟢 官方推荐安装方式（跨平台）
+      # =============================
+      - name: Install XMake (Official Script)
         run: |
-          sudo apt-get update
-          sudo apt-get install -y build-essential mingw-w64
-
-      - name: Setup XMake
-        run: |
-          # 直接使用GitHub提供的xmake
-          if ("${{ runner.os }}" -eq "Windows") {
-            # Windows使用PowerShell直接下载
-            Invoke-WebRequest -Uri "https://github.com/xmake-io/xmake/releases/download/v3.0.4/xmake-v3.0.4-win64.zip" -OutFile "xmake.zip"
-            Expand-Archive -Path "xmake.zip" -DestinationPath "."
-            $env:PATH += ";$pwd"
+          if ($env:RUNNER_OS -eq "Windows") {
+            # Windows: 使用官方 PowerShell 脚本安装
+            iex "& { $(irm https://xmake.io/install.ps1) }"
           } else {
-            # Linux使用包管理器
-            curl -fsSL https://xmake.io/shget.text | bash
+            # Linux/macOS: 使用官方 Bash 脚本安装
+            bash <(curl -fsSL https://xmake.io/install.sh)
           }
+        shell: powershell
 
-      - name: Show environment
+      - name: Verify XMake Installation
         run: |
-          if ("${{ runner.os }}" -eq "Windows") {
-            Write-Host "Windows environment"
-            Get-Command xmake
-          } else {
-            echo "Linux environment"
-            which xmake
+          echo "XMake version:"
+          xmake --version
+          if ($LASTEXITCODE -ne 0) {
+            Write-Error "XMake not installed correctly!"
+            exit 1
           }
+        shell: powershell
 
       - name: Configure with XMake
         working-directory: cleaner-cs2
         run: |
           echo "Configuring for ${{ matrix.platform }}-${{ matrix.arch }}"
           
-          if ("${{ runner.os }}" -eq "Windows") {
-            # Windows平台配置
+          if ($env:RUNNER_OS -eq "Windows") {
             xmake f -p windows -a x64 -m release
           } else {
-            # Linux平台配置
             xmake f -p linux -a x64 -m release
           }
         shell: powershell
@@ -102,7 +95,7 @@ jobs:
       - name: Verify build success
         working-directory: cleaner-cs2
         run: |
-          if ("${{ runner.os }}" -eq "Windows") {
+          if ($env:RUNNER_OS -eq "Windows") {
             if (Test-Path "build/windows/x64/release/CleanerCS2-Xmake.dll") {
               echo "✓ DLL build successful"
               Get-ChildItem -Path "build/windows/x64/release" -Force
@@ -126,14 +119,17 @@ jobs:
       - name: Create package structure
         working-directory: cleaner-cs2
         run: |
-          mkdir -p package
-          if ("${{ runner.os }}" -eq "Windows") {
+          if ($env:RUNNER_OS -eq "Windows") {
+            New-Item -ItemType Directory -Path "package" -Force
             if (Test-Path "build/windows/x64/release/CleanerCS2-Xmake.dll") {
-              cp "build/windows/x64/release/CleanerCS2-Xmake.dll" package/
+              Copy-Item -Path "build/windows/x64/release/CleanerCS2-Xmake.dll" -Destination "package/"
+              echo "✓ Copied DLL to package"
             }
           } else {
+            mkdir -p package
             if (Test-Path "build/linux/x86_64/release/libCleanerCS2-Xmake.so") {
               cp "build/linux/x86_64/release/libCleanerCS2-Xmake.so" package/
+              echo "✓ Copied SO to package"
             }
           }
         shell: powershell
@@ -158,5 +154,4 @@ jobs:
             cleaner-cs2/xmake.lua
             cleaner-cs2/README.md
             cleaner-cs2/LICENSE
-            cleaner-cs2/package/**
           retention-days: 7
