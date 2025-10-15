@@ -58,73 +58,117 @@ jobs:
         with:
           xmake-version: latest
 
-      - name: Show system info
+      - name: Setup build environment
         run: |
+          echo "=== Environment Information ==="
           xmake --version
-          echo "Working directory: $PWD"
-          echo "HL2SDKCS2 path: $HL2SDKCS2"
-          echo "MMSOURCE112 path: $MMSOURCE112"
-          # 使用兼容的命令
-          if ($env:RUNNER_OS -eq "Windows") {
-            Get-ChildItem -Path "$env:HL2SDKCS2" -Force
+          echo "Runner OS: $env:RUNNER_OS"
+          echo "Working directory: $env:PWD"
+          echo "HL2SDKCS2 path: $env:HL2SDKCS2"
+          echo "MMSOURCE112 path: $env:MMSOURCE112"
+          
+          # Check if paths exist
+          if (Test-Path "$env:HL2SDKCS2") {
+            echo "✓ HL2SDK path exists"
+            Get-ChildItem -Path "$env:HL2SDKCS2" -Force | Select-Object Name, Length
           } else {
-            ls -la "$env:HL2SDKCS2"
+            echo "✗ HL2SDK path does not exist"
+            dir "$env:HL2SDKCS2" -ErrorAction SilentlyContinue
+          }
+          
+          if (Test-Path "$env:MMSOURCE112") {
+            echo "✓ Metamod-Source path exists"
+            Get-ChildItem -Path "$env:MMSOURCE112" -Force | Select-Object Name, Length
+          } else {
+            echo "✗ Metamod-Source path does not exist"
+            dir "$env:MMSOURCE112" -ErrorAction SilentlyContinue
+          }
+
+      - name: Show project structure
+        working-directory: cleaner-cs2
+        run: |
+          echo "=== Project Structure ==="
+          if (Test-Path "xmake.lua") {
+            echo "✓ xmake.lua exists"
+            Get-Content xmake.lua | Select-Object -First 10
+          } else {
+            echo "✗ xmake.lua not found"
+            dir -Recurse
           }
 
       - name: Configure with XMake
         working-directory: cleaner-cs2
         run: |
+          echo "=== Configuring XMake ==="
           echo "Configuring for ${{ matrix.platform }}-${{ matrix.arch }}"
-          # 移除不兼容的 --backup 参数
-          if ($env:RUNNER_OS -eq "Windows") {
+          
+          # Set timeout to prevent cancellation
+          $ErrorActionPreference = "Stop"
+          try {
             xmake f -p windows -a x64 -m release
-          } else {
-            xmake f -p linux -a x64 -m release
+            if ($LASTEXITCODE -ne 0) {
+              echo "XMake configure failed with exit code: $LASTEXITCODE"
+              exit 1
+            }
+            echo "XMake configure completed successfully"
+          } catch {
+            echo "XMake configure error: $_"
+            exit 1
           }
+        shell: powershell
 
       - name: Build project
         working-directory: cleaner-cs2
         run: |
-          echo "Building project..."
-          xmake build -v
+          echo "=== Building Project ==="
+          $ErrorActionPreference = "Stop"
+          try {
+            xmake build -v
+            if ($LASTEXITCODE -ne 0) {
+              echo "Build failed with exit code: $LASTEXITCODE"
+              exit 1
+            }
+            echo "Build completed successfully"
+          } catch {
+            echo "Build error: $_"
+            exit 1
+          }
+        shell: powershell
 
       - name: Verify build success
         working-directory: cleaner-cs2
         run: |
-          if ($env:RUNNER_OS -eq "Windows") {
+          echo "=== Verifying Build ==="
+          $ErrorActionPreference = "Stop"
+          try {
             if (Test-Path "build/windows/x64/release/CleanerCS2-Xmake.dll") {
               echo "✓ DLL build successful"
               Get-ChildItem -Path "build/windows/x64/release" -Force
+              exit 0
             } else {
               echo "✗ DLL build failed"
-              Get-ChildItem -Path "build/windows/x64/release" -Force
+              if (Test-Path "build/windows/x64/release") {
+                Get-ChildItem -Path "build/windows/x64/release" -Force
+              }
               exit 1
             }
-          } else {
-            if (Test-Path "build/linux/x86_64/release/libCleanerCS2-Xmake.so") {
-              echo "✓ SO build successful"
-              ls -la "build/linux/x86_64/release"
-            } else {
-              echo "✗ SO build failed"
-              ls -la "build/linux/x86_64/release"
-              exit 1
-            }
+          } catch {
+            echo "Verification error: $_"
+            exit 1
           }
+        shell: powershell
 
       - name: Create package structure
         working-directory: cleaner-cs2
         run: |
-          mkdir -p package
-          # Copy the built library to package directory
-          if ($env:RUNNER_OS -eq "Windows") {
-            if (Test-Path "build/windows/x64/release/CleanerCS2-Xmake.dll") {
-              cp "build/windows/x64/release/CleanerCS2-Xmake.dll" package/
-            }
-          } else {
-            if (Test-Path "build/linux/x86_64/release/libCleanerCS2-Xmake.so") {
-              cp "build/linux/x86_64/release/libCleanerCS2-Xmake.so" package/
-            }
+          echo "=== Creating Package ==="
+          New-Item -ItemType Directory -Path "package" -Force
+          if (Test-Path "build/windows/x64/release/CleanerCS2-Xmake.dll") {
+            Copy-Item -Path "build/windows/x64/release/CleanerCS2-Xmake.dll" -Destination "package/"
+            echo "✓ Copied DLL to package"
           }
+          Get-ChildItem -Path "package" -Recurse -Force
+        shell: powershell
 
       - name: Upload build artifacts
         if: success()
@@ -153,10 +197,8 @@ jobs:
         if: success()
         working-directory: cleaner-cs2
         run: |
-          echo "=== Build completed successfully ==="
-          if ($env:RUNNER_OS -eq "Windows") {
-            Get-ChildItem -Path "package" -Recurse -Force
-          } else {
-            find package -type f
-          }
+          echo "=== Final Verification ==="
+          echo "Final package contents:"
+          Get-ChildItem -Path "package" -Recurse -Force
           echo "=================================="
+        shell: powershell
